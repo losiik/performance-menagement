@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>REST Polling vs WebSocket Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .container { display: flex; gap: 20px; }
+        .method { border: 1px solid #ccc; padding: 15px; width: 45%; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .result { background: #f0f0f0; padding: 10px; margin-top: 10px; min-height: 100px; }
+        .stats { background: #e8f4f8; padding: 10px; margin-top: 10px; }
+        h2 { color: #333; }
+    </style>
+</head>
+<body>
+<h1>REST Polling vs WebSocket Comparison</h1>
+
+<div class="container">
+    <!-- REST Polling -->
+    <div class="method">
+        <h2>REST + Polling</h2>
+        <label>Задержка (сек): <input type="number" id="delayPolling" value="5" min="1" max="30"></label>
+        <br><button onclick="startPolling()">Запустить парсинг (Polling)</button>
+        <div class="result" id="resultPolling">Ожидание запуска...</div>
+        <div class="stats" id="statsPolling">
+            <strong>Статистика:</strong><br>
+            HTTP запросов: <span id="requestCount">0</span><br>
+            Объём данных: <span id="dataSize">0</span> байт<br>
+            Время: <span id="timePolling">0</span> мс
+        </div>
+    </div>
+
+    <!-- WebSocket -->
+    <div class="method">
+        <h2>WebSocket</h2>
+        <label>Задержка (сек): <input type="number" id="delayWS" value="5" min="1" max="30"></label>
+        <br><button onclick="startWebSocket()">Запустить парсинг (WebSocket)</button>
+        <div class="result" id="resultWS">Ожидание запуска...</div>
+        <div class="stats" id="statsWS">
+            <strong>Статистика:</strong><br>
+            HTTP запросов: <span id="requestCountWS">1</span> (только инициация)<br>
+            Объём данных: <span id="dataSizeWS">0</span> байт<br>
+            Время: <span id="timeWS">0</span> мс
+        </div>
+    </div>
+</div>
+
+<script>
+    let stompClient = null;
+    let pollingRequestCount = 0;
+    let pollingDataSize = 0;
+
+    // REST Polling
+    async function startPolling() {
+        const delay = document.getElementById('delayPolling').value;
+        document.getElementById('resultPolling').textContent = 'Запуск парсинга...';
+
+        pollingRequestCount = 0;
+        pollingDataSize = 0;
+        const startTime = Date.now();
+
+        try {
+            // Запуск задачи
+            const response = await fetch(`/api/parse/start?delay=${delay}`, { method: 'POST' });
+            const job = await response.json();
+            pollingRequestCount++;
+            pollingDataSize += JSON.stringify(job).length;
+
+            document.getElementById('resultPolling').textContent = `Job ID: ${job.id}\nStatus: ${job.status}`;
+
+            // Polling каждые 500 мс
+            const interval = setInterval(async () => {
+                const statusResponse = await fetch(`/api/parse/status/${job.id}`);
+                const statusData = await statusResponse.json();
+                pollingRequestCount++;
+                pollingDataSize += JSON.stringify(statusData).length;
+
+                document.getElementById('requestCount').textContent = pollingRequestCount;
+                document.getElementById('dataSize').textContent = pollingDataSize;
+
+                if (statusData.status === 'COMPLETED' || statusData.status === 'FAILED') {
+                    clearInterval(interval);
+                    const totalTime = Date.now() - startTime;
+                    document.getElementById('timePolling').textContent = totalTime;
+                    document.getElementById('resultPolling').textContent =
+                        `Status: ${statusData.status}\nResult: ${statusData.result}\n\nВсего запросов: ${pollingRequestCount}`;
+                } else {
+                    document.getElementById('resultPolling').textContent = `Job ID: ${job.id}\nStatus: Polling... (${pollingRequestCount} запросов)`;
+                }
+            }, 500);
+
+        } catch (error) {
+            document.getElementById('resultPolling').textContent = `Error: ${error}`;
+        }
+    }
+
+    // WebSocket
+    function connectWebSocket() {
+        const socket = new SockJS('/ws');
+        stompClient = Stomp.over(socket);
+        stompClient.connect({}, function(frame) {
+            console.log('WebSocket connected');
+        });
+    }
+
+    async function startWebSocket() {
+        const delay = document.getElementById('delayWS').value;
+        document.getElementById('resultWS').textContent = 'Запуск парсинга через WebSocket...';
+
+        const startTime = Date.now();
+
+        // Подключаемся если ещё не подключены
+        if (!stompClient || !stompClient.connected) {
+            connectWebSocket();
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        try {
+            // Запуск задачи
+            const response = await fetch(`/api/parse/start-ws?delay=${delay}`, { method: 'POST' });
+            const job = await response.json();
+
+            document.getElementById('resultWS').textContent = `Job ID: ${job.id}\nStatus: Ожидание результата...`;
+            document.getElementById('dataSizeWS').textContent = JSON.stringify(job).length;
+
+            // Подписка на результат
+            stompClient.subscribe(`/topic/parsing/${job.id}`, function(message) {
+                const result = JSON.parse(message.body);
+                const totalTime = Date.now() - startTime;
+
+                document.getElementById('timeWS').textContent = totalTime;
+                document.getElementById('dataSizeWS').textContent =
+                    JSON.stringify(job).length + JSON.stringify(result).length;
+                document.getElementById('resultWS').textContent =
+                    `Status: ${result.status}\nResult: ${result.result}\n\nВремя: ${totalTime} мс`;
+            });
+
+        } catch (error) {
+            document.getElementById('resultWS').textContent = `Error: ${error}`;
+        }
+    }
+
+    // Подключаемся при загрузке
+    window.onload = connectWebSocket;
+</script>
+</body>
+</html>
