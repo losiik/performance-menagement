@@ -1,8 +1,8 @@
 package ru.klosep.performance_management.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,12 +29,12 @@ public class TaskController {
         }
     }
 
-    // ГОРЯЧИЕ ДАННЫЕ: Получение всех задач (часто запрашивается, редко меняется)
+    // ГОРЯЧИЕ ДАННЫЕ: Получение всех задач
     @Cacheable(value = "tasks", key = "'all'")
     @GetMapping
     public ResponseEntity<List<Task>> getAllTasks() {
         System.out.println("⚠️ CACHE MISS: Loading all tasks from storage...");
-        simulateDbDelay(200); // Симуляция запроса к БД
+        simulateDbDelay(200);
         return ResponseEntity.ok(new ArrayList<>(tasks.values()));
     }
 
@@ -63,8 +63,11 @@ public class TaskController {
         return ResponseEntity.status(HttpStatus.CREATED).body(task);
     }
 
-    // UPDATE - с инвалидацией обоих кэшей
-    @CacheEvict(value = {"task", "tasks"}, key = "#id")
+    // UPDATE - с инвалидацией обоих кэшей (ИСПОЛЬЗУЕМ @Caching)
+    @Caching(evict = {
+            @CacheEvict(value = "task", key = "#id"),
+            @CacheEvict(value = "tasks", key = "'all'")
+    })
     @PutMapping("/{id}")
     public ResponseEntity<Task> updateTask(@PathVariable Long id, @RequestBody Task taskDetails) {
         System.out.println("✅ Cache evicted: task:" + id + " and tasks:all");
@@ -82,8 +85,11 @@ public class TaskController {
         return ResponseEntity.ok(task);
     }
 
-    // DELETE - с инвалидацией кэшей
-    @CacheEvict(value = {"task", "tasks"}, allEntries = true)
+    // DELETE - с инвалидацией кэшей (ИСПОЛЬЗУЕМ @Caching)
+    @Caching(evict = {
+            @CacheEvict(value = "task", allEntries = true),
+            @CacheEvict(value = "tasks", allEntries = true)
+    })
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteTask(@PathVariable Long id) {
         System.out.println("✅ Cache evicted: all entries");
