@@ -1,0 +1,6 @@
+id,title,description,completed
+1,Implement hexagonal architecture,Create ports and adapters,true
+2,Write unit tests,Test domain logic,false
+3,Add REST controller,HTTP interface,true
+4,Setup Redis cache,Distributed caching,false
+5,Create documentation,Write README,true
